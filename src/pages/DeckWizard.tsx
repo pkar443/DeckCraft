@@ -3,12 +3,13 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { 
   Sparkles, ArrowLeft, ArrowRight, Upload, RefreshCw,
-  Check, Loader2, ChevronDown, X, Wand2, FileText
+  Check, Loader2, ChevronDown, X
 } from 'lucide-react';
 import { useDeckStore } from '@/lib/store';
-import { Deck, OutlineSlide, ContentType, Tone, SlideType, SlideLayout, SlidePurpose } from '@/lib/schema';
+import { Deck, OutlineSlide, ContentType, Tone } from '@/lib/schema';
 import { ThemeId, THEMES } from '@/lib/themes';
-import { SAMPLE_DECKS } from '@/lib/sample-data';
+import { generateOutline as aiGenerateOutline } from '@/lib/ai/generateOutline';
+import { generateDeck as aiGenerateDeck } from '@/lib/ai/generateDeck';
 
 // ─── Step 1: Prompt Form ─────────────────────────────────────────────────────
 
@@ -453,38 +454,7 @@ const DEFAULT_DATA: Step1Data = {
   aiVisuals: true,
 };
 
-function generateOutline(data: Step1Data): OutlineSlide[] {
-  const count = data.slideCount;
-  const layouts: SlideLayout[] = [
-    'title-hero-left', 'agenda-clean', 'two-column-explainer', 'stat-cards-grid',
-    'bullets-with-side-image', 'comparison-split', 'horizontal-process', 'milestone-timeline',
-    'quote-impact', 'closing-contact',
-  ];
-  const purposes: SlidePurpose[] = ['intro', 'agenda', 'content', 'data', 'content', 'comparison', 'process', 'timeline', 'quote', 'closing'];
-  const types: SlideType[] = ['hero-title', 'agenda', 'two-column', 'kpi-dashboard', 'bullet-image', 'comparison', 'process-flow', 'timeline', 'quote', 'closing'];
 
-  const titles = [
-    data.prompt.split(' ').slice(0, 5).join(' ') || 'Introduction',
-    'Agenda',
-    'The Problem & Opportunity',
-    'Key Metrics & Results',
-    'Core Features & Benefits',
-    'Competitive Landscape',
-    'Our Process',
-    'Roadmap & Timeline',
-    'What Our Customers Say',
-    'Next Steps & Call to Action',
-  ];
-
-  return Array.from({ length: Math.min(count, 10) }, (_, i) => ({
-    id: `outline-${i}`,
-    title: titles[i] || `Slide ${i + 1}`,
-    purpose: purposes[i % purposes.length],
-    layout: layouts[i % layouts.length],
-    contentIntent: `${purposes[i % purposes.length]} slide content`,
-    hasVisual: data.aiVisuals && i !== 1,
-  }));
-}
 
 export default function DeckWizard() {
   const navigate = useNavigate();
@@ -498,15 +468,35 @@ export default function DeckWizard() {
   const handleStep1Next = async () => {
     setStep(2);
     setIsGeneratingOutline(true);
-    await new Promise(r => setTimeout(r, 1500));
-    setOutline(generateOutline(formData));
+    try {
+      const generated = await aiGenerateOutline({
+        prompt: formData.prompt,
+        audience: formData.audience,
+        tone: formData.tone,
+        contentType: formData.contentType,
+        slideCount: formData.slideCount,
+      });
+      setOutline(generated);
+    } catch (e) {
+      console.error('Outline generation failed:', e);
+    }
     setIsGeneratingOutline(false);
   };
 
   const handleRegenerate = async () => {
     setIsGeneratingOutline(true);
-    await new Promise(r => setTimeout(r, 1200));
-    setOutline(generateOutline(formData));
+    try {
+      const generated = await aiGenerateOutline({
+        prompt: formData.prompt,
+        audience: formData.audience,
+        tone: formData.tone,
+        contentType: formData.contentType,
+        slideCount: formData.slideCount,
+      });
+      setOutline(generated);
+    } catch (e) {
+      console.error('Outline regeneration failed:', e);
+    }
     setIsGeneratingOutline(false);
   };
 
@@ -516,38 +506,46 @@ export default function DeckWizard() {
 
   const handleAcceptOutline = async () => {
     setStep(3);
-    // Simulate generation stages
-    for (let i = 0; i <= STAGES.length; i++) {
-      await new Promise(r => setTimeout(r, 900));
-      setGenerationStage(i);
-    }
+    setGenerationStage(0);
 
-    // Find or create a deck
-    const sourceDeck = SAMPLE_DECKS[0];
-    const newDeck: Deck = {
-      ...sourceDeck,
-      id: `deck-${Date.now()}`,
-      title: outline[0]?.title || formData.prompt.split(' ').slice(0, 5).join(' ') || 'New Deck',
-      prompt: formData.prompt,
-      audience: formData.audience,
-      tone: formData.tone,
-      contentType: formData.contentType,
-      slideCount: outline.length,
-      themeId: formData.themeId,
-      status: 'ready',
-      createdAt: new Date(),
-      updatedAt: new Date(),
-      deckJson: {
+    try {
+      const slides = await aiGenerateDeck({
+        outline,
+        prompt: formData.prompt,
+        audience: formData.audience,
+        tone: formData.tone,
+        contentType: formData.contentType,
         themeId: formData.themeId,
-        slides: sourceDeck.deckJson.slides.slice(0, outline.length),
-      },
-    };
+        onProgress: (stage) => setGenerationStage(stage),
+      });
 
-    addDeck(newDeck);
-    setCurrentDeck(newDeck);
+      const newDeck: Deck = {
+        id: `deck-${Date.now()}`,
+        title: outline[0]?.title || formData.prompt.split(' ').slice(0, 5).join(' ') || 'New Deck',
+        prompt: formData.prompt,
+        audience: formData.audience,
+        tone: formData.tone,
+        contentType: formData.contentType,
+        slideCount: slides.length,
+        themeId: formData.themeId,
+        status: 'ready',
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        deckJson: {
+          themeId: formData.themeId,
+          slides,
+        },
+      };
 
-    await new Promise(r => setTimeout(r, 600));
-    navigate(`/decks/${newDeck.id}`);
+      addDeck(newDeck);
+      setCurrentDeck(newDeck);
+      await new Promise(r => setTimeout(r, 400));
+      navigate(`/decks/${newDeck.id}`);
+    } catch (e) {
+      console.error('Deck generation failed:', e);
+      // Navigate anyway with empty deck to avoid getting stuck
+      navigate('/dashboard');
+    }
   };
 
   return (

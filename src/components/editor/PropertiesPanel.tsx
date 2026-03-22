@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { Slide, SlideType, SlideLayout } from '@/lib/schema';
+import { Slide, SlideLayout } from '@/lib/schema';
 import { Theme } from '@/lib/themes';
+import { reviseSlide } from '@/lib/ai/generateDeck';
 import { 
-  Wand2, Image, AlignLeft, AlignCenter, AlignRight, Bold, Italic,
-  RefreshCw, Sparkles, Type, LayoutGrid, ChevronDown
+  Wand2, Image, RefreshCw, Sparkles, LayoutGrid, CheckCircle
 } from 'lucide-react';
 
 interface PropertiesPanelProps {
@@ -36,12 +36,24 @@ const AI_SUGGESTIONS = [
 export function PropertiesPanel({ activeSlide, theme, onUpdateSlide }: PropertiesPanelProps) {
   const [aiInstruction, setAiInstruction] = useState('');
   const [isRewriting, setIsRewriting] = useState(false);
-  const [showLayoutSwitcher, setShowLayoutSwitcher] = useState(false);
+  const [rewriteSuccess, setRewriteSuccess] = useState(false);
   const [activeTab, setActiveTab] = useState<'style' | 'layout' | 'ai'>('layout');
 
   const handleAiRewrite = async () => {
+    if (!activeSlide) return;
     setIsRewriting(true);
-    await new Promise(r => setTimeout(r, 1500));
+    setRewriteSuccess(false);
+    try {
+      const instruction = aiInstruction || 'Improve this slide content, make it more compelling and clear';
+      const updates = await reviseSlide(activeSlide, instruction);
+      if (Object.keys(updates).length > 0) {
+        onUpdateSlide(updates);
+        setRewriteSuccess(true);
+        setTimeout(() => setRewriteSuccess(false), 2500);
+      }
+    } catch (e) {
+      console.warn('AI rewrite failed:', e);
+    }
     setIsRewriting(false);
     setAiInstruction('');
   };
@@ -204,9 +216,16 @@ export function PropertiesPanel({ activeSlide, theme, onUpdateSlide }: Propertie
                 onClick={handleAiRewrite}
                 disabled={isRewriting}
                 className="w-full py-2.5 rounded-xl font-semibold text-xs flex items-center justify-center gap-2"
-                style={{ background: 'linear-gradient(135deg, #2563EB, #7C3AED)', color: '#fff', opacity: isRewriting ? 0.7 : 1 }}>
+                style={{ 
+                  background: rewriteSuccess ? 'rgba(52,211,153,0.2)' : 'linear-gradient(135deg, #2563EB, #7C3AED)', 
+                  color: rewriteSuccess ? '#34D399' : '#fff', 
+                  border: rewriteSuccess ? '1px solid rgba(52,211,153,0.4)' : 'none',
+                  opacity: isRewriting ? 0.7 : 1 
+                }}>
                 {isRewriting ? (
                   <><div className="w-3 h-3 rounded-full border border-white border-t-transparent animate-spin" /> Rewriting...</>
+                ) : rewriteSuccess ? (
+                  <><CheckCircle className="w-3 h-3" /> Rewrite Applied!</>
                 ) : (
                   <><Wand2 className="w-3 h-3" /> Rewrite Slide</>
                 )}
